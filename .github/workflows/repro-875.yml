@@ -1,0 +1,54 @@
+name: Repro 875
+
+on:
+  push:
+    branches: [ci/repro-875]
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  repro:
+    name: runtime install --link (${{ matrix.ref }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [main, fix/875-link-lib64-firefox]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        working-directory: native
+        run: cargo build
+      - name: Fedora layout (Firefox only in /usr/lib64/firefox)
+        working-directory: native
+        run: |
+          for d in /usr/lib/firefox /usr/lib/firefox-esr; do [ -e "$d" ] && sudo mv "$d" "$d.away" || true; done
+          sudo mkdir -p /usr/lib64/firefox/defaults/pref /usr/lib64/firefox/browser
+          printf '#!/bin/sh\n' | sudo tee /usr/lib64/firefox/firefox >/dev/null
+          sudo cp /usr/lib64/firefox/firefox /usr/lib64/firefox/firefox-bin
+          sudo chmod +x /usr/lib64/firefox/firefox /usr/lib64/firefox/firefox-bin
+          echo 'pref("app.update.channel", "release");' | sudo tee /usr/lib64/firefox/defaults/pref/channel-prefs.js >/dev/null
+          sudo touch /usr/lib64/firefox/libxul.so /usr/lib64/firefox/omni.ja /usr/lib64/firefox/application.ini
+          export FFPWA_SYSDATA="$PWD" FFPWA_USERDATA="$RUNNER_TEMP/ffpwa"
+          set +e
+          ./target/debug/firefoxpwa runtime install --link; echo "exit=$?"
+          set -e
+          echo "--- runtime directory:"; ls -la "$FFPWA_USERDATA/runtime" || true
+          echo "--- use_linked_runtime:"; grep -o '"use_linked_runtime":[a-z]*' "$FFPWA_USERDATA/config.json" || true
+      - name: No system Firefox at all
+        working-directory: native
+        run: |
+          sudo rm -rf /usr/lib64/firefox
+          export FFPWA_SYSDATA="$PWD" FFPWA_USERDATA="$RUNNER_TEMP/ffpwa2"
+          mkdir -p "$FFPWA_USERDATA/runtime" && touch "$FFPWA_USERDATA/runtime/keep-me"
+          set +e
+          ./target/debug/firefoxpwa runtime install --link; echo "exit=$?"
+          set -e
+          echo "--- runtime directory (keep-me should survive a refused link):"; ls -la "$FFPWA_USERDATA/runtime" || true
+          echo "--- use_linked_runtime:"; grep -o '"use_linked_runtime":[a-z]*' "$FFPWA_USERDATA/config.json" || true
