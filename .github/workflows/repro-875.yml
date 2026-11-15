@@ -25,6 +25,12 @@ jobs:
       - name: Build
         working-directory: native
         run: cargo build
+      - name: Where build.rs put the shell completions
+        working-directory: native
+        run: |
+          ls target/debug/completions 2>&1 || true
+          find target -path '*completions*' -name 'firefoxpwa.bash' 2>/dev/null | head -5
+          cargo --version
       - name: Fedora layout (Firefox only in /usr/lib64/firefox)
         working-directory: native
         run: |
@@ -35,12 +41,17 @@ jobs:
           sudo chmod +x /usr/lib64/firefox/firefox /usr/lib64/firefox/firefox-bin
           echo 'pref("app.update.channel", "release");' | sudo tee /usr/lib64/firefox/defaults/pref/channel-prefs.js >/dev/null
           sudo touch /usr/lib64/firefox/libxul.so /usr/lib64/firefox/omni.ja /usr/lib64/firefox/application.ini
-          export FFPWA_SYSDATA="$PWD" FFPWA_USERDATA="$RUNNER_TEMP/ffpwa"
-          set +e
-          ./target/debug/firefoxpwa runtime install --link; echo "exit=$?"
-          set -e
-          echo "--- runtime directory:"; ls -la "$FFPWA_USERDATA/runtime" || true
-          echo "--- use_linked_runtime:"; grep -o '"use_linked_runtime":[a-z]*' "$FFPWA_USERDATA/config.json" || true
+          export FFPWA_SYSDATA="$PWD"
+          for case in fresh existing-runtime; do
+            export FFPWA_USERDATA="$RUNNER_TEMP/ffpwa-$case"
+            if [ "$case" = existing-runtime ]; then mkdir -p "$FFPWA_USERDATA/runtime" && touch "$FFPWA_USERDATA/runtime/old-file"; fi
+            echo "=== case: $case"
+            set +e
+            ./target/debug/firefoxpwa runtime install --link; echo "exit=$?"
+            set -e
+            echo "--- runtime directory:"; ls -la "$FFPWA_USERDATA/runtime" || true
+            echo "--- use_linked_runtime:"; grep -o '"use_linked_runtime": *[a-z]*' "$FFPWA_USERDATA/config.json" || true
+          done
       - name: No system Firefox at all
         working-directory: native
         run: |
@@ -51,4 +62,4 @@ jobs:
           ./target/debug/firefoxpwa runtime install --link; echo "exit=$?"
           set -e
           echo "--- runtime directory (keep-me should survive a refused link):"; ls -la "$FFPWA_USERDATA/runtime" || true
-          echo "--- use_linked_runtime:"; grep -o '"use_linked_runtime":[a-z]*' "$FFPWA_USERDATA/config.json" || true
+          echo "--- use_linked_runtime:"; grep -o '"use_linked_runtime": *[a-z]*' "$FFPWA_USERDATA/config.json" || true
